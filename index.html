@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ConvoCore😎</title>
+<style>
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #f4f7fa;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+h2 { color: #333; margin-top: 20px; }
+.container {
+    width: 90%;
+    max-width: 600px;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    padding: 20px;
+    margin: 20px 0;
+    display: flex;
+    flex-direction: column;
+}
+input, button {
+    padding: 10px;
+    margin: 5px 0;
+    width: calc(100% - 22px);
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    box-sizing: border-box;
+}
+button {
+    background: #007BFF;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+button:hover { background: #0056b3; }
+#messages {
+    border: 1px solid #ccc;
+    border-radius: 10px;
+    height: 300px;
+    overflow-y: scroll;
+    padding: 10px;
+    margin-bottom: 10px;
+    background: #f9f9f9;
+    display: flex;
+    flex-direction: column;
+}
+.message {
+    margin-bottom: 10px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    max-width: 80%;
+    word-wrap: break-word;
+}
+.message.own { background: #007BFF; color: white; align-self: flex-end; }
+.message.other { background: #e0e0e0; color: #333; align-self: flex-start; }
+#alert { color: red; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+
+<h2>ConvoCore😎❤️</h2>
+
+<!-- LOGIN / REGISTER -->
+<div class="container" id="loginContainer">
+    <h3>Register / Login</h3>
+    <div id="alert"></div>
+    <input type="text" id="username" placeholder="Username">
+    <input type="email" id="email" placeholder="Email (register only)">
+    <input type="password" id="password" placeholder="Password">
+    <button onclick="register()">Register</button>
+    <button onclick="login()">Login</button>
+</div>
+
+<!-- CHAT -->
+<div class="container" id="chatContainer" style="display:none;">
+    <h3>Chat Room</h3>
+    <input type="text" id="roomName" placeholder="Room name">
+    <button onclick="joinRoom()">Join / Create Room</button>
+    <div id="messages"></div>
+    <input type="text" id="messageInput" placeholder="Type message">
+    <button onclick="sendMessage()">Send</button>
+</div>
+
+<script>
+let token = null;
+let ws = null;
+let currentRoom = null;
+let username = null;
+const API_URL = "http://127.0.0.1:8000/api";
+const alertBox = document.getElementById('alert');
+const messagesDiv = document.getElementById('messages');
+
+// ---------------- REGISTER ----------------
+function register() {
+    alertBox.textContent = '';
+    const uname = document.getElementById('username').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value.trim();
+    if(!uname || !email || !password){ 
+        alertBox.textContent = "Fill all fields to register"; 
+        return; 
+    }
+
+    fetch(`${API_URL}/auth/register/`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: uname, email, password})
+    })
+    .then(res => res.json())
+    .then(data => {
+        if(data.id){
+            alertBox.style.color = "green";
+            alertBox.textContent = 'Registered! Now login.';
+        } else {
+            alertBox.style.color = "red";
+            alertBox.textContent = JSON.stringify(data);
+        }
+    })
+    .catch(err => alertBox.textContent = "Error: " + err);
+}
+
+// ---------------- LOGIN ----------------
+function login() {
+    alertBox.textContent = '';
+    username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+    if(!username || !password){ 
+        alertBox.textContent = "Fill username and password"; 
+        return; 
+    }
+
+    fetch(`${API_URL}/auth/login/`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username, password})
+    })
+    .then(res => res.json())
+    .then(data => {
+        if(data.access){
+            token = data.access;
+            document.getElementById('loginContainer').style.display = 'none';
+            document.getElementById('chatContainer').style.display = 'flex';
+        } else { 
+            alertBox.textContent = "Login failed: " + JSON.stringify(data); 
+        }
+    })
+    .catch(err => alertBox.textContent = "Error: " + err);
+}
+
+// ---------------- JOIN / CREATE ROOM ----------------
+function joinRoom() {
+    alertBox.textContent = '';
+    currentRoom = document.getElementById('roomName').value.trim().replace(/\s+/g, "_");
+    if(!currentRoom){ 
+        alertBox.textContent = "Enter a room name!"; 
+        return; 
+    }
+
+    if(!token){
+        alertBox.textContent = "You must login first!";
+        return;
+    }
+
+    if(ws){ ws.close(); messagesDiv.innerHTML = ''; }
+
+    ws = new WebSocket(`ws://127.0.0.1:8080/ws/chat/${currentRoom}/?token=${token}`);
+
+    ws.onopen = () => {
+        console.log("Connected to WebSocket");
+        fetchMessages(currentRoom);
+    };
+
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        const sender = data.sender || 'Anonymous';
+        const message = data.message || '';
+        if(message){
+            appendMessage(sender, message, sender === username);
+        }
+    };
+
+    ws.onclose = () => console.log("WebSocket disconnected");
+    ws.onerror = (e) => console.error("WebSocket error:", e);
+
+    document.getElementById('roomName').value = '';
+}
+
+// ---------------- FETCH OLD MESSAGES ----------------
+function fetchMessages(roomName) {
+    fetch(`${API_URL}/chat/rooms/${roomName}/messages/`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    })
+    .then(res => res.json())
+    .then(messages => {
+        messagesDiv.innerHTML = '';
+        messages.forEach(msg => {
+            const isOwn = msg.sender === username;
+            appendMessage(msg.sender, msg.content, isOwn);
+        });
+    })
+    .catch(err => console.error("Fetch error:", err));
+}
+
+// ---------------- SEND MESSAGE ----------------
+function sendMessage() {
+    const input = document.getElementById('messageInput');
+    const message = input.value.trim();
+    if(ws && message){
+        ws.send(JSON.stringify({message}));
+        //appendMessage(username, message, true);
+        input.value = '';
+    }
+}
+
+// ---------------- APPEND MESSAGE ----------------
+function appendMessage(sender, message, own=false) {
+    const div = document.createElement('div');
+    div.classList.add('message', own ? 'own' : 'other');
+    div.textContent = `${sender}: ${message}`;
+    messagesDiv.appendChild(div);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+</script>
+
+
+</body>
+</html>
