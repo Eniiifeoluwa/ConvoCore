@@ -41,9 +41,9 @@ Convocore is a Django backend API for real time conversations. It is built on Dj
    python manage.py runserver
 ```
 6. Run WebSocket worker
-   ```
+```
    daphne -b 0.0.0.0 -p 8001 convocore.asgi:application
-   ```
+```
 ## Usage
 - Register and authenticate users through REST endpoints
 - Create one to one conversations or group conversations
